@@ -1,0 +1,8 @@
+Projection    UTM
+Zone          19
+Datum         WGS84
+Spheroid      WGS84
+Units         METERS
+Zunits        NO
+Yshift        10000000.0
+Parameters    
