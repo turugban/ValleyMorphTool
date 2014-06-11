@@ -1,6 +1,6 @@
 ValleyMorph Tool
 
-Related article: Daxberger, H., Dalumpines, R., Scott, D.M., Riller, U. (in press). The ValleyMorph Tool: An Automated Extraction Tool for Transverse Topographic Symmetry (T-) Factor and Valley Width to Valley Height (Vf) Ratio. Computers & Geosciences.
+Related article: Daxberger, H., Dalumpines, R., Scott, D.M., Riller, U. (in press). The ValleyMorph Tool: An Automated Extraction Tool for Transverse Topographic Symmetry (T-) Factor and Valley Width to Valley Height (Vf) Ratio. Computers & Geosciences, available online 7 June 2014. DOI: 10.1016/j.cageo.2014.05.015
 
 The ValleyMorph tool creates crosslines (perpendicular to) or profile lines of watershed midline. For each predefined interval, the tool measures distances from the midline to the river, and from the river to the watershed boundary. The tool extracts elevation values for points defined by the intersection of the crosslines, watershed boundary, and the extent of valley floor. Aside from the elevation values, the tool also measures the width of the valley floor for each interval. Most of the results are summarized in tables, with feature classes included for validation and other purposes. The tool's outputs, which consist of six file geodatabase feature classes and three tables, are stored in a user-defined file geodatabase. The output filenames can be identified with "rt_" prefix.
 
