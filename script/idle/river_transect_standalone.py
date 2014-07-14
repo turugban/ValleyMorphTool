@@ -1,10 +1,13 @@
-# File: river_transect_standalone.py
-# Created by: Ron Dalumpines, turugban@yahoo.com
-# Date created: December 8, 2012
-# Last revised: March 3, 2013
-# Requirements: ArcGIS 10.1 (Advanced License), Python 2.7.
-# Description: Extract distance and elevation information via automated river transect (renamed ValleyMorphTool).
-# Note: Tested in ArcGIS 10.1; some geoprocessing functions need to be changed for earlier versions from 9.3.
+"""
+File: river_transect_standalone.py
+Created by: Ron Dalumpines, turugban@yahoo.com
+Date created: December 8, 2012
+Last revised: July 14, 2014
+Requirements: ArcGIS 10.1 (Advanced License), Python 2.7.
+Description: Extract distance and elevation information via automated river transect (renamed ValleyMorphTool).
+Note: Tested in ArcGIS 10.1; some geoprocessing functions need to be changed for earlier versions from 9.3.
+Acknowledgements: Thanks to David Wynne (ESRI) for his point-to-line script, which was used in this tool.
+"""
 
 # Imports.
 import os
@@ -248,6 +251,8 @@ def remove_duplicate_measure(fc):
 def remove_duplicate_side(crosslines, riverline, radius, sidefield):
     """
     Ensures only one selection for each interval measure.
+
+    Suited for cases where the entire midline is located inside the watershed.
     """
     gp.near_analysis(crosslines, riverline, radius, "LOCATION", "ANGLE")
     m = 0
@@ -265,6 +270,30 @@ def remove_duplicate_side(crosslines, riverline, radius, sidefield):
             rows.deleterow(row)
         m = n
         p = q
+        row = rows.next()
+    del rows, row
+
+def remove_duplicate_side2(dissolvelines, sortfield="MEASURE"):
+    """
+    Ensures only one selection for each interval measure.
+
+    Suited for cases where parts of midline are located outside of watershed.
+    """
+    sortfields = "%s A; Shape_Length D" % sortfield
+    rows = gp.updatecursor(dissolvelines, "", "", "", sortfields)
+    row = rows.next()
+    pid, plen = 0, 0
+    while row:
+        cid = row.getvalue(sortfield)
+        clen = row.shape.length
+        if pid == cid:
+            if plen > clen:
+                rows.deleterow(row)
+            else:
+                raise ValueError("dissolved lines not sorted by length properly")
+        else:
+            pid = cid
+            plen = clen
         row = rows.next()
     del rows, row
 
@@ -554,7 +583,6 @@ def append_axisbearings(intervalpoints, lowpoint, interval):
     maxmeasure = (gp.getcount_management(intervalpoints) + 1)*interval   
     radius = "%i" % maxmeasure
     gp.near_analysis(intervalpoints, lowpoint, radius, "LOCATION", "ANGLE")  # north = 90 degrees, east = 0 degree
-
     print("near analysis for intervalpoints calculated ...")
     
     # Calculate bearings.
@@ -637,7 +665,6 @@ def get_longest_riverline(riverline, sinkpoint, sourcepoint, interval_profile):
     infeatureclass = "%s SIMPLE_EDGE NO" % rivername
     gp.creategeometricnetwork_management(featuredataset, geonetworkname, infeatureclass)
     geonetworkpath = os.path.join(featuredataset, geonetworkname)
-
     print("geometric network for streams created ...")
     
     # Create flags using sinkpoint and sourcepoint.
@@ -651,7 +678,6 @@ def get_longest_riverline(riverline, sinkpoint, sourcepoint, interval_profile):
     pointstomerge = '"%s;%s"' % (flag1, flag2)
     flags = "flags"
     gp.merge_management(pointstomerge, flags)
-
     print("flags consisting of source and sink points created ...")
     
     # Trace the path between flags and generate longest riverline.
@@ -661,7 +687,6 @@ def get_longest_riverline(riverline, sinkpoint, sourcepoint, interval_profile):
     # Check if longest river exceeds river profile interval.
     if interval_profile > get_axislength("longest_riverline"):
         raise IOError("main (longest) river too short for the river profile interval")
-
     print("longest_riverline created ...")
     
 ##    for fc in [flag1, flag2, flags, featuredataset, longestpath]:
@@ -776,7 +801,6 @@ def get_axismidlines(in_raster, axismidpoints, watershedpolygon, wid, longaxis, 
     rightmidlines = get_bearingtoline(axismidpoints, "RBEARING")
     leftmidlines = get_bearingtoline(axismidpoints, "LBEARING")
     out_merge = merge([rightmidlines, leftmidlines], "mergemidlines")
-
     print("bearing lines created and merged ...")
     
     out_clip = get_featureclass_name(gp.workspace, outputname)
@@ -784,17 +808,14 @@ def get_axismidlines(in_raster, axismidpoints, watershedpolygon, wid, longaxis, 
     # Assign watershed ID.
     gp.addfield_management(out_clip, "WID", "LONG", "", "", "", "WATERSHED ID")
     gp.calculatefield_management(out_clip, "WID", wid, "PYTHON", "#")
-
     print("watershed ID added ...")
 
     # Update sidefield if right or left.
     create_sidefield(in_raster, lowpoint, out_clip, sidefield, sidealias)
-
     print("sidefield created and updated ...")
     
     # Remove dangling or broken lines.
     axismidlines = remove_danglinglines(out_clip, longaxis, sidefield)
-    
     print("dangling lines removed ...")
     
     # Assign crossline type.
@@ -802,7 +823,41 @@ def get_axismidlines(in_raster, axismidpoints, watershedpolygon, wid, longaxis, 
     print("crosstype = %s" % crosstype)
     crosstypevalue = "\"%s\"" % crosstype
     gp.calculatefield_management(axismidlines, "PERTO", crosstypevalue, "PYTHON", "#")
+    print("crosstype created and updated ...")
+    
+##    # Delete intermediate data.
+##    for infc in [rightmidlines, leftmidlines, out_merge]:
+##        gp.delete_management(gp.describe(infc).catalogpath)
+        
+    return axismidlines
 
+def get_axismidlines2(in_raster, axismidpoints, watershedpolygon, wid, longaxis, lowpoint, crosstype, outputname, sidefield="SIDE", sidealias="SIDE OF MIDLINE"):
+    # Create lines to right and left of interval points.
+    rightmidlines = get_bearingtoline(axismidpoints, "RBEARING")
+    leftmidlines = get_bearingtoline(axismidpoints, "LBEARING")
+    out_merge = merge([rightmidlines, leftmidlines], "mergemidlines")
+    print("bearing lines created and merged ...")
+    
+    # Remove dangling or broken lines.
+    axismidlines = get_featureclass_name(gp.workspace, outputname)
+    gp.clip_analysis(out_merge, watershedpolygon, axismidlines)
+    remove_danglinglines2(axismidlines)
+    print("dangling lines removed ...")
+    
+    # Assign watershed ID.
+    gp.addfield_management(axismidlines, "WID", "LONG", "", "", "", "WATERSHED ID")
+    gp.calculatefield_management(axismidlines, "WID", wid, "PYTHON", "#")
+    print("watershed ID added ...")
+
+    # Update sidefield if right or left.
+    create_sidefield(in_raster, lowpoint, axismidlines, sidefield, sidealias)
+    print("sidefield created and updated ...")
+    
+    # Assign crossline type.
+    gp.addfield_management(axismidlines, "PERTO", "TEXT", "", "", "", "PERPENDICULAR TO")
+    print("crosstype = %s" % crosstype)
+    crosstypevalue = "\"%s\"" % crosstype
+    gp.calculatefield_management(axismidlines, "PERTO", crosstypevalue, "PYTHON", "#")
     print("crosstype created and updated ...")
     
 ##    # Delete intermediate data.
@@ -942,6 +997,11 @@ def dissolve_axismidlines(axismidlines, outputname):
     gp.dissolve_management(axismidlines, outputname, "MEASURE", "#", "SINGLE_PART", "DISSOLVE_LINES")
     return outputname
 
+def dissolve_axismidlines2(axismidlines, outputname):
+    gp.dissolve_management(axismidlines, outputname, "MEASURE", "#", "SINGLE_PART", "DISSOLVE_LINES")
+    remove_duplicate_side2(outputname)
+    return outputname
+
 def get_fieldtype(in_table, fieldname):
     fieldtype = None
     f = gp.listfields(in_table)
@@ -997,13 +1057,13 @@ def get_watershedmidline(watershedmidpoints, watershedpolygon, wid):
         point2line(watershedmidpoints, "watershedmidline", "", "SORT_ID")  # ArcGIS v9.3.1 or earlier
     except:
         gp.pointstoline_management(watershedmidpoints, "watershedmidline", "", "SORT_ID")  # ArcGIS 10.0 or later
-    # Check if midline not outside watershed.
-    gp.makefeaturelayer("watershedmidline", "watershedmidlinelyr")
-    gp.selectlayerbylocation_management("watershedmidlinelyr", "COMPLETELY_WITHIN", watershedpolygon, "#", "NEW_SELECTION")
-    if gp.getcount_management("watershedmidlinelyr") == 0:
-        print "WARNING: part of midline is outside of watershed, consider reducing the longaxis interval then try again"
-    gp.selectlayerbyattribute("watershedmidlinelyr", "CLEAR_SELECTION")
-    gp.delete_management("watershedmidlinelyr")
+##    # Check if midline not outside watershed.
+##    gp.makefeaturelayer("watershedmidline", "watershedmidlinelyr")
+##    gp.selectlayerbylocation_management("watershedmidlinelyr", "COMPLETELY_WITHIN", watershedpolygon, "#", "NEW_SELECTION")
+##    if gp.getcount_management("watershedmidlinelyr") == 0:
+##        print "WARNING: part of midline is outside of watershed, consider reducing the longaxis interval then try again"
+##    gp.selectlayerbyattribute("watershedmidlinelyr", "CLEAR_SELECTION")
+##    gp.delete_management("watershedmidlinelyr")
     # Add watershed ID field.
     gp.addfield_management("watershedmidline", "WID", "LONG", "", "", "", "WATERSHED ID")
     gp.calculatefield_management("watershedmidline", "WID", wid, "PYTHON", "#")
@@ -1137,7 +1197,6 @@ def get_elevationpoints(in_raster, crosslines, crosslinedissolve, valleyfloor, c
     update_field("elevendpoints", sidefield, "LOCATION", valuelist=[("RIGHT","WSR"), ("LEFT","WSL")])
     # Delete intermediate data.
     gp.delete_management("diss_endpoints")
-
     print("elevendpoints created ...")
     
     # Clip crosslinedissolve by valleyfloor.
@@ -1161,7 +1220,6 @@ def get_elevationpoints(in_raster, crosslines, crosslinedissolve, valleyfloor, c
     a, b, c = "clipcross", "clipcross_sgp", "vfendpoints"
     for letter in [a, b, c]:
         gp.delete_management(gp.describe(letter).catalogpath)
-    
     print("elevflrpoints created ...")
     
     # Generate midpoints from valleycross.
@@ -1175,7 +1233,6 @@ def get_elevationpoints(in_raster, crosslines, crosslinedissolve, valleyfloor, c
     a, b = "vfmidpoints", "clipcross_tsm"
     for letter in [a, b]:
         gp.delete_management(gp.describe(letter).catalogpath)
-    
     print("elevmidpoints created ...")
     
     # Merge elevendpoints, elevflrpoints, elevmidpoints.
@@ -1186,7 +1243,6 @@ def get_elevationpoints(in_raster, crosslines, crosslinedissolve, valleyfloor, c
     a, b, c = "elevendpoints", "elevflrpoints", "elevmidpoints"
     for letter in [a, b, c]:
         gp.delete_management(gp.describe(letter).catalogpath)
-
     print("extracted elevation values to points ...")
 
     fieldstoretain = ["MEASURE", "WID", "SIDE_RIVER", "PERTO", "LOCATION", "ELEVATION"]
@@ -1296,7 +1352,6 @@ def measure_midlinetoriver(tlooklines, riverline, watershedmidpoints):
     gp.selectlayerbylocation_management("tlooklines_ftlk", "INTERSECT", watershedmidpoints, "#", "SUBSET_SELECTION")
     gp.calculatefield_management("tlooklines_ftlk", "DIST_AB", "1", "PYTHON", "#")
     remove_duplicate_measure("tlooklines_ftlk")  # remove duplicate measure with high midlinetoriver distance
-
     print("measured distance from midline to river ...")
     
     fieldstoretain = ["MEASURE", "WID", "SIDE", "PERTO", "DIST_AB"]
@@ -1393,6 +1448,16 @@ def remove_danglinglines(rivercrosslines, riverline, sidefield):
     gp.copyfeatures_management("rivercrosslines_mts", rivercrosslines)
     gp.delete_management("rivercrosslines_mts")
     return rivercrosslines
+
+def remove_danglinglines2(axismidlines):
+    dissolve_axismidlines2(axismidlines, "dissolvemidlines")
+    gp.makefeaturelayer_management("dissolvemidlines", "axisdissolvelayer")
+    gp.makefeaturelayer_management(axismidlines, "axismidlineslayer")
+    gp.selectlayerbylocation_management("axismidlineslayer", "SHARE_A_LINE_SEGMENT_WITH", "axisdissolvelayer", "#", "NEW_SELECTION")
+    gp.selectlayerbyattribute_management("axismidlineslayer", "SWITCH_SELECTION")
+    if gp.getcount_management("axismidlineslayer") > 0:
+        gp.deleterows_management("axismidlineslayer")
+    gp.delete_management("dissolvemidlines")
 
 def get_gdbfiles_list(data_type, wildcard=None):
     fcslist = []
@@ -1517,10 +1582,10 @@ def get_riverprofile(in_raster, localdem, localwatershed, wid, interval, interva
     gp.setprogressorlabel("longaxis created")
     axismidpoints = create_axismidpoints(reduced_raster, lowpoint, longaxis, wid, interval, count_interval)
     gp.setprogressorlabel("axismidpoints created")
-    axismidlines = get_axismidlines(reduced_raster, axismidpoints, watershedpolygon, wid, longaxis, lowpoint, "LONGAXIS", "myaxismidlines")
+    axismidlines = get_axismidlines2(reduced_raster, axismidpoints, watershedpolygon, wid, longaxis, lowpoint, "LONGAXIS", "myaxismidlines")
     gp.setprogressorlabel("axismidlines created")
     
-    axisdissolve = dissolve_axismidlines(axismidlines, "axisdissolve")
+    axisdissolve = dissolve_axismidlines2(axismidlines, "axisdissolve")
     gp.setprogressorlabel("axisdissolve created")
     watershedmidpoints = get_watershedmidpoints(axisdissolve, longaxis, lowpoint, farpoint)
     gp.setprogressorlabel("watershedmidpoints created")
@@ -1583,7 +1648,6 @@ def main(workspace, in_raster, watershedbound, watershedfid, widlist, interval, 
     tempgdb = get_tempgdb("rivertransect")
     gp.workspace = tempgdb
     gp.scratchworkspace = tempgdb
-    
     print "gp.scratchworkspace = %s" % gp.scratchworkspace
     
     # Generate river profile for all listed watersheds.
